@@ -112,6 +112,21 @@ const DEFAULT_DAYS = [
   },
 ];
 
+/* ═══════════════════════ DROPDOWN OPTIONS ═══════════════════════ */
+
+const WEIGHT_OPTIONS = (() => {
+  const opts = ["BW"];
+  for (let w = 5; w <= 50; w += 2.5) opts.push(String(w));
+  for (let w = 55; w <= 450; w += 5) opts.push(String(w));
+  return opts;
+})();
+
+const REP_OPTIONS = (() => {
+  const opts = ["BW"];
+  for (let r = 1; r <= 30; r++) opts.push(String(r));
+  return opts;
+})();
+
 /* ═══════════════════════ STORAGE & UTILS ═══════════════════════ */
 
 const store = {
@@ -132,58 +147,20 @@ const buildTD = (daysArr) => daysArr.map((d) => ({
 
 const getSessionLogs = () => {
   const keys = store.keys("log:");
-  return keys.map((k) => {
-    const d = store.get(k);
-    if (!d) return null;
-    const parts = k.split(":");
-    return { key: k, date: parts[1], dayId: parts[2], ...d };
-  }).filter(Boolean);
+  return keys.map((k) => { const d = store.get(k); if (!d) return null; const parts = k.split(":"); return { key: k, date: parts[1], dayId: parts[2], ...d }; }).filter(Boolean);
 };
 
 const calcVolume = (sessionData) => {
   let vol = 0;
-  if (sessionData?.circuits) {
-    sessionData.circuits.forEach((c) => c.forEach((round) => round.forEach((s) => {
-      if (s.done && s.weight && s.reps) vol += parseFloat(s.weight) * parseInt(s.reps);
-    })));
-  }
-  if (sessionData?.finisher) {
-    sessionData.finisher.forEach((ex) => ex.sets.forEach((s) => {
-      if (s.done && s.weight && s.reps) vol += parseFloat(s.weight) * parseInt(s.reps);
-    }));
-  }
+  const addVol = (s) => { if (s.done && s.weight && s.weight !== "BW" && s.reps && s.reps !== "BW") vol += parseFloat(s.weight) * parseInt(s.reps); };
+  if (sessionData?.circuits) sessionData.circuits.forEach((c) => c.forEach((r) => r.forEach(addVol)));
+  if (sessionData?.finisher) sessionData.finisher.forEach((ex) => ex.sets.forEach(addVol));
   return vol;
-};
-
-const getExerciseHistory = (logs, exName) => {
-  const entries = [];
-  logs.forEach((log) => {
-    const d = log.data || log;
-    if (!d.circuits) return;
-    d.circuits.forEach((c) => c.forEach((round) => round.forEach((s) => {
-      if (s.done && s.weight) {
-        const logDays = store.get("circuit-v2")?.days || DEFAULT_DAYS;
-        logDays.forEach((day) => day.circuits.forEach((circ) => circ.exercises.forEach((ex, ei) => {
-          if (ex.name === exName) {
-            d.circuits.forEach((c2) => c2.forEach((round2) => {
-              if (round2[ei] && round2[ei].done && round2[ei].weight) {
-                entries.push({ date: log.date, weight: parseFloat(round2[ei].weight), reps: parseInt(round2[ei].reps) || 0 });
-              }
-            }));
-          }
-        })));
-      }
-    })));
-  });
-  const unique = {};
-  entries.forEach((e) => { const k = `${e.date}-${e.weight}`; if (!unique[k]) unique[k] = e; });
-  return Object.values(unique).sort((a, b) => a.date.localeCompare(b.date));
 };
 
 const getPrevSessionWeights = (logs, dayId) => {
   const dayLogs = logs.filter((l) => l.dayId === dayId).sort((a, b) => b.date.localeCompare(a.date));
-  if (dayLogs.length === 0) return null;
-  return dayLogs[0].data;
+  return dayLogs.length > 0 ? dayLogs[0].data : null;
 };
 
 /* ═══════════════════════ THEME ═══════════════════════ */
@@ -195,6 +172,91 @@ const T = {
   glow: (c) => `0 0 20px ${c}15, 0 0 4px ${c}25`,
   cardGlow: (c) => `inset 0 0 30px ${c}08`,
 };
+
+/* ═══════════════════════ SELECT COMPONENTS ═══════════════════════ */
+
+const selectBase = {
+  padding: "4px 2px", background: T.input, border: `1px solid ${T.border}`,
+  borderRadius: 5, color: "#fff", fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
+  textAlign: "center", outline: "none", appearance: "none", WebkitAppearance: "none",
+  cursor: "pointer",
+};
+
+function WeightSelect({ value, onChange, placeholder, accent }) {
+  const isCustom = value && value !== "BW" && !WEIGHT_OPTIONS.includes(value);
+  const [customMode, setCustomMode] = useState(isCustom);
+
+  useEffect(() => { if (value && value !== "BW" && !WEIGHT_OPTIONS.includes(value)) setCustomMode(true); }, [value]);
+
+  if (customMode) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <input type="number" inputMode="decimal" placeholder="lbs" value={value === "__custom__" ? "" : value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ ...selectBase, width: 48, textAlign: "center" }} autoFocus />
+        <button onClick={() => { setCustomMode(false); onChange(""); }}
+          style={{ background: "none", border: "none", color: T.textMuted, fontSize: 10, cursor: "pointer", padding: "0 2px", fontFamily: "'JetBrains Mono', monospace" }}>✕</button>
+      </div>
+    );
+  }
+
+  return (
+    <select value={value || ""} onChange={(e) => {
+      if (e.target.value === "__custom__") { setCustomMode(true); onChange("__custom__"); }
+      else onChange(e.target.value);
+    }} style={{
+      ...selectBase, width: 58,
+      color: value ? "#fff" : T.textMuted,
+      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%233e3e50'/%3E%3C/svg%3E")`,
+      backgroundRepeat: "no-repeat", backgroundPosition: "right 4px center", paddingRight: 14,
+    }}>
+      <option value="" disabled style={{ color: T.textMuted }}>{placeholder || "lbs"}</option>
+      <option value="BW">BW</option>
+      {WEIGHT_OPTIONS.slice(1).map((w) => (
+        <option key={w} value={w}>{w}</option>
+      ))}
+      <option value="__custom__">Custom</option>
+    </select>
+  );
+}
+
+function RepsSelect({ value, onChange, placeholder }) {
+  const isCustom = value && value !== "BW" && !REP_OPTIONS.includes(value);
+  const [customMode, setCustomMode] = useState(isCustom);
+
+  useEffect(() => { if (value && value !== "BW" && !REP_OPTIONS.includes(value)) setCustomMode(true); }, [value]);
+
+  if (customMode) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <input type="number" inputMode="numeric" placeholder="#" value={value === "__custom__" ? "" : value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ ...selectBase, width: 36, textAlign: "center" }} autoFocus />
+        <button onClick={() => { setCustomMode(false); onChange(""); }}
+          style={{ background: "none", border: "none", color: T.textMuted, fontSize: 10, cursor: "pointer", padding: "0 2px", fontFamily: "'JetBrains Mono', monospace" }}>✕</button>
+      </div>
+    );
+  }
+
+  return (
+    <select value={value || ""} onChange={(e) => {
+      if (e.target.value === "__custom__") { setCustomMode(true); onChange("__custom__"); }
+      else onChange(e.target.value);
+    }} style={{
+      ...selectBase, width: 48,
+      color: value ? "#fff" : T.textMuted,
+      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%233e3e50'/%3E%3C/svg%3E")`,
+      backgroundRepeat: "no-repeat", backgroundPosition: "right 4px center", paddingRight: 14,
+    }}>
+      <option value="" disabled style={{ color: T.textMuted }}>{placeholder || "reps"}</option>
+      <option value="BW">BW</option>
+      {REP_OPTIONS.slice(1).map((r) => (
+        <option key={r} value={r}>{r}</option>
+      ))}
+      <option value="__custom__">Custom</option>
+    </select>
+  );
+}
 
 /* ═══════════════════════ COMPONENTS ═══════════════════════ */
 
@@ -224,7 +286,7 @@ function BottomNav({ tab, setTab, accent }) {
     { id: "nutrition", icon: "🥗", label: "NUTRITION" },
   ];
   return (
-    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 998, background: T.elevated, borderTop: `1px solid ${T.border}`, display: "flex", height: 56, backdropFilter: "blur(12px)" }}>
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 998, background: T.elevated, borderTop: `1px solid ${T.border}`, display: "flex", height: 56 }}>
       {tabs.map((t) => (
         <button key={t.id} onClick={() => setTab(t.id)} style={{
           flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
@@ -344,7 +406,6 @@ function CircuitCard({ circuit, cIdx, trackData, rpe, accent, dayIdx, editMode, 
               {circuit.exercises.map((ex, ei) => {
                 const sd = trackData[ri]?.[ei] || { weight: "", reps: "", done: false };
                 const prevWeight = prevData?.[ri]?.[ei]?.weight || "";
-                const prevReps = prevData?.[ri]?.[ei]?.reps || "";
                 return (
                   <div key={ei} style={{ display: "grid", gridTemplateColumns: "26px 1fr", gap: 6, alignItems: "center", padding: "4px 0", opacity: sd.done ? 0.25 : 1, transition: "opacity 0.2s" }}>
                     <button onClick={() => { onCheck(cIdx, ri, ei); if (!sd.done) startRest(circuit.rest); }} style={{
@@ -353,13 +414,11 @@ function CircuitCard({ circuit, cIdx, trackData, rpe, accent, dayIdx, editMode, 
                       display: "flex", alignItems: "center", justifyContent: "center",
                       boxShadow: sd.done ? T.glow(accent) : "none",
                     }}>{sd.done && <span style={{ color: "#fff", fontSize: 11 }}>✓</span>}</button>
-                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <span style={{ fontSize: 12, color: T.text, flex: 1, fontFamily: "var(--body)", opacity: 0.85 }}>{ex.name}</span>
-                      <input type="number" inputMode="decimal" placeholder={prevWeight || "lbs"} value={sd.weight} onChange={(e) => onSetChange(cIdx, ri, ei, "weight", e.target.value)}
-                        style={{ width: 50, padding: "3px 4px", background: T.input, border: `1px solid ${T.border}`, borderRadius: 4, color: "#fff", fontSize: 12, fontFamily: "var(--mono)", textAlign: "center", outline: "none" }} />
+                      <WeightSelect value={sd.weight} onChange={(v) => onSetChange(cIdx, ri, ei, "weight", v)} placeholder={prevWeight || "lbs"} accent={accent} />
                       <span style={{ color: T.textMuted, fontSize: 9 }}>×</span>
-                      <input type="number" inputMode="numeric" placeholder={prevReps || ex.reps} value={sd.reps} onChange={(e) => onSetChange(cIdx, ri, ei, "reps", e.target.value)}
-                        style={{ width: 38, padding: "3px 4px", background: T.input, border: `1px solid ${T.border}`, borderRadius: 4, color: "#fff", fontSize: 12, fontFamily: "var(--mono)", textAlign: "center", outline: "none" }} />
+                      <RepsSelect value={sd.reps} onChange={(v) => onSetChange(cIdx, ri, ei, "reps", v)} placeholder={ex.reps} />
                     </div>
                   </div>
                 );
@@ -405,13 +464,11 @@ function FinisherCard({ finisher, trackData, accent, editMode, dayIdx, onCheck, 
                   background: sd.done ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center",
                   boxShadow: sd.done ? T.glow(accent) : "none",
                 }}>{sd.done && <span style={{ color: "#fff", fontSize: 11 }}>✓</span>}</button>
-                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   <span style={{ color: T.textMuted, fontSize: 10, fontFamily: "var(--mono)", width: 18 }}>S{si + 1}</span>
-                  <input type="number" inputMode="decimal" placeholder="lbs" value={sd.weight} onChange={(e) => onSetChange(ei, si, "weight", e.target.value)}
-                    style={{ width: 50, padding: "3px 4px", background: T.input, border: `1px solid ${T.border}`, borderRadius: 4, color: "#fff", fontSize: 12, fontFamily: "var(--mono)", textAlign: "center", outline: "none" }} />
+                  <WeightSelect value={sd.weight} onChange={(v) => onSetChange(ei, si, "weight", v)} accent={accent} />
                   <span style={{ color: T.textMuted, fontSize: 9 }}>×</span>
-                  <input type="number" inputMode="numeric" placeholder={ex.reps} value={sd.reps} onChange={(e) => onSetChange(ei, si, "reps", e.target.value)}
-                    style={{ width: 38, padding: "3px 4px", background: T.input, border: `1px solid ${T.border}`, borderRadius: 4, color: "#fff", fontSize: 12, fontFamily: "var(--mono)", textAlign: "center", outline: "none" }} />
+                  <RepsSelect value={sd.reps} onChange={(v) => onSetChange(ei, si, "reps", v)} placeholder={ex.reps} />
                 </div>
               </div>
             ))}
@@ -427,27 +484,18 @@ function FinisherCard({ finisher, trackData, accent, editMode, dayIdx, onCheck, 
 function HistoryTab({ days }) {
   const [logs] = useState(() => getSessionLogs());
   const [expanded, setExpanded] = useState(null);
-  const dayMap = {};
-  days.forEach((d) => { dayMap[d.id] = d; });
-
-  const allExercises = useMemo(() => {
-    const names = new Set();
-    days.forEach((d) => d.circuits.forEach((c) => c.exercises.forEach((e) => names.add(e.name))));
-    return [...names];
-  }, [days]);
+  const dayMap = {}; days.forEach((d) => { dayMap[d.id] = d; });
 
   const prMap = useMemo(() => {
     const prs = {};
     logs.forEach((log) => {
-      const d = log.data;
-      if (!d?.circuits) return;
-      const dd = dayMap[log.dayId];
-      if (!dd) return;
+      const d = log.data; if (!d?.circuits) return;
+      const dd = dayMap[log.dayId]; if (!dd) return;
       dd.circuits.forEach((circ, ci) => {
         circ.exercises.forEach((ex, ei) => {
           d.circuits[ci]?.forEach((round) => {
             const s = round[ei];
-            if (s?.done && s.weight) {
+            if (s?.done && s.weight && s.weight !== "BW") {
               const w = parseFloat(s.weight);
               if (!prs[ex.name] || w > prs[ex.name]) prs[ex.name] = w;
             }
@@ -463,10 +511,8 @@ function HistoryTab({ days }) {
     if (dates.length === 0) return 0;
     let count = 1;
     for (let i = 1; i < dates.length; i++) {
-      const curr = new Date(dates[i - 1]);
-      const prev = new Date(dates[i]);
-      const diff = (curr - prev) / (1000 * 60 * 60 * 24);
-      if (diff <= 3) count++; else break;
+      const curr = new Date(dates[i - 1]); const prev = new Date(dates[i]);
+      if ((curr - prev) / (1000 * 60 * 60 * 24) <= 3) count++; else break;
     }
     return count;
   }, [logs]);
@@ -481,7 +527,6 @@ function HistoryTab({ days }) {
 
   return (
     <div style={{ padding: "16px" }}>
-      {/* Stats Bar */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
         {[
           { label: "SESSIONS", value: logs.length, icon: "🏋️" },
@@ -496,7 +541,6 @@ function HistoryTab({ days }) {
         ))}
       </div>
 
-      {/* PR Board */}
       {Object.keys(prMap).length > 0 && (
         <div style={{ background: T.card, borderRadius: 10, padding: "12px 14px", marginBottom: 16, border: `1px solid ${T.border}` }}>
           <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", color: "#ffc048", letterSpacing: 1.5, marginBottom: 8 }}>⚡ PERSONAL RECORDS</div>
@@ -511,11 +555,9 @@ function HistoryTab({ days }) {
         </div>
       )}
 
-      {/* Session Log */}
       <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", color: T.textSec, letterSpacing: 1.5, marginBottom: 8 }}>SESSION LOG</div>
       {logs.map((log, i) => {
-        const dd = dayMap[log.dayId];
-        const vol = calcVolume(log.data);
+        const dd = dayMap[log.dayId]; const vol = calcVolume(log.data);
         let total = 0, done = 0;
         if (log.data?.circuits) log.data.circuits.forEach((c) => c.forEach((r) => r.forEach((s) => { total++; if (s.done) done++; })));
         if (log.data?.finisher) log.data.finisher.forEach((e) => e.sets.forEach((s) => { total++; if (s.done) done++; }));
@@ -531,7 +573,7 @@ function HistoryTab({ days }) {
                   <span style={{ fontSize: 10, color: T.textMuted, fontFamily: "var(--mono)" }}>{log.date}</span>
                 </div>
                 <div style={{ fontSize: 11, color: T.textSec, fontFamily: "var(--mono)", marginTop: 3 }}>
-                  {fmt(log.elapsed || 0)} · {compPct}% complete{vol > 0 ? ` · ${vol.toLocaleString()} lbs` : ""}
+                  {fmt(log.elapsed || 0)} · {compPct}%{vol > 0 ? ` · ${vol.toLocaleString()} lbs` : ""}
                 </div>
               </div>
               <div style={{ width: 36, height: 36, borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, fontFamily: "var(--mono)", background: compPct === 100 ? `${dd?.color}20` : T.elevated, color: compPct === 100 ? dd?.color : T.textSec }}>{compPct}%</div>
@@ -545,7 +587,7 @@ function HistoryTab({ days }) {
                       const weights = [];
                       log.data.circuits[ci]?.forEach((round) => {
                         const s = round[ei];
-                        if (s?.weight) weights.push(`${s.weight}×${s.reps || "?"}`);
+                        if (s?.weight) weights.push(`${s.weight}${s.weight === "BW" ? "" : ""}×${s.reps || "?"}`);
                       });
                       return weights.length > 0 ? (
                         <div key={ei} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
@@ -576,30 +618,19 @@ const DEFAULT_TARGETS = [
 ];
 
 const DEFAULT_MEALS = [
-  { id: "meal1", label: "Meal 1 — Breakfast" },
-  { id: "meal2", label: "Meal 2 — Lunch" },
-  { id: "meal3", label: "Meal 3 — Dinner" },
-  { id: "snack", label: "Snack" },
-  { id: "preworkout", label: "Pre-Workout" },
-  { id: "postworkout", label: "Post-Workout" },
-  { id: "creatine", label: "Creatine" },
-  { id: "vitamins", label: "Vitamins / Supps" },
+  { id: "meal1", label: "Meal 1 — Breakfast" }, { id: "meal2", label: "Meal 2 — Lunch" },
+  { id: "meal3", label: "Meal 3 — Dinner" }, { id: "snack", label: "Snack" },
+  { id: "preworkout", label: "Pre-Workout" }, { id: "postworkout", label: "Post-Workout" },
+  { id: "creatine", label: "Creatine" }, { id: "vitamins", label: "Vitamins / Supps" },
 ];
 
 function NutritionTab() {
   const today = new Date().toISOString().slice(0, 10);
   const [data, setData] = useState(() => store.get(`nutrition:${today}`) || { targets: {}, meals: {} });
   const [savedN, setSavedN] = useState(false);
-
   const toggleTarget = (id) => setData((p) => ({ ...p, targets: { ...p.targets, [id]: !p.targets[id] } }));
   const toggleMeal = (id) => setData((p) => ({ ...p, meals: { ...p.meals, [id]: !p.meals[id] } }));
-
-  const save = () => {
-    store.set(`nutrition:${today}`, data);
-    setSavedN(true);
-    setTimeout(() => setSavedN(false), 1200);
-  };
-
+  const save = () => { store.set(`nutrition:${today}`, data); setSavedN(true); setTimeout(() => setSavedN(false), 1200); };
   const totalChecks = DEFAULT_TARGETS.length + DEFAULT_MEALS.length;
   const doneChecks = Object.values(data.targets).filter(Boolean).length + Object.values(data.meals).filter(Boolean).length;
   const pct = Math.round((doneChecks / totalChecks) * 100);
@@ -614,7 +645,6 @@ function NutritionTab() {
         <div style={{ width: 42, height: 42, borderRadius: 21, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, fontFamily: "var(--mono)", background: pct === 100 ? "#2ed8a320" : T.elevated, color: pct === 100 ? "#2ed8a3" : T.textSec, border: `2px solid ${pct === 100 ? "#2ed8a340" : T.border}` }}>{pct}%</div>
       </div>
 
-      {/* Macro Targets */}
       <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", color: "#2ed8a3", letterSpacing: 1.5, marginBottom: 8 }}>DAILY TARGETS</div>
       <div style={{ background: T.card, borderRadius: 10, padding: "8px 12px", marginBottom: 16, border: `1px solid ${T.border}` }}>
         {DEFAULT_TARGETS.map((t) => {
@@ -632,7 +662,6 @@ function NutritionTab() {
         })}
       </div>
 
-      {/* Meal Checklist */}
       <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", color: "#ffc048", letterSpacing: 1.5, marginBottom: 8 }}>MEALS & SUPPS</div>
       <div style={{ background: T.card, borderRadius: 10, padding: "8px 12px", marginBottom: 16, border: `1px solid ${T.border}` }}>
         {DEFAULT_MEALS.map((m, i) => {
@@ -679,11 +708,7 @@ export default function App() {
   const day = days[activeDay];
   const td = trackData[activeDay];
 
-  const prevSessionData = useMemo(() => {
-    const logs = getSessionLogs();
-    const prev = getPrevSessionWeights(logs, day.id);
-    return prev;
-  }, [day.id]);
+  const prevSessionData = useMemo(() => { const logs = getSessionLogs(); return getPrevSessionWeights(logs, day.id); }, [day.id]);
 
   const ensureSession = useCallback(() => { if (!sessionStart) { const t = Date.now(); setSessionStart(t); store.set("circuit-session-v2", t); } }, [sessionStart]);
   const startRest = useCallback((dur) => { setRestTimer(dur); ensureSession(); }, [ensureSession]);
@@ -695,13 +720,9 @@ export default function App() {
   const onApplyAll = useCallback((ci) => {
     setTrackData((p) => {
       const n = JSON.parse(JSON.stringify(p));
-      const r0 = n[activeDay].circuits[ci][0];
-      if (!r0) return p;
+      const r0 = n[activeDay].circuits[ci][0]; if (!r0) return p;
       for (let ri = 1; ri < n[activeDay].circuits[ci].length; ri++) {
-        r0.forEach((s, ei) => {
-          if (s.weight) n[activeDay].circuits[ci][ri][ei].weight = s.weight;
-          if (s.reps) n[activeDay].circuits[ci][ri][ei].reps = s.reps;
-        });
+        r0.forEach((s, ei) => { if (s.weight) n[activeDay].circuits[ci][ri][ei].weight = s.weight; if (s.reps) n[activeDay].circuits[ci][ri][ei].reps = s.reps; });
       }
       return n;
     });
@@ -719,34 +740,14 @@ export default function App() {
   const onEditFinisher = useCallback((di, ei, f, v) => {
     setDays((p) => {
       const n = JSON.parse(JSON.stringify(p));
-      if (f === "sets") {
-        const ns = parseInt(v) || 1;
-        n[di].finisher.exercises[ei].sets = ns;
-        setTrackData((t) => {
-          const nt = JSON.parse(JSON.stringify(t));
-          const curr = nt[di].finisher[ei]?.sets || [];
-          while (curr.length < ns) curr.push({ weight: "", reps: "", done: false });
-          nt[di].finisher[ei] = { sets: curr.slice(0, ns) };
-          return nt;
-        });
+      if (f === "sets") { const ns = parseInt(v) || 1; n[di].finisher.exercises[ei].sets = ns; setTrackData((t) => { const nt = JSON.parse(JSON.stringify(t)); const curr = nt[di].finisher[ei]?.sets || []; while (curr.length < ns) curr.push({ weight: "", reps: "", done: false }); nt[di].finisher[ei] = { sets: curr.slice(0, ns) }; return nt; });
       } else if (f === "rest") { n[di].finisher.exercises[ei].rest = parseInt(v) || 0;
       } else { n[di].finisher.exercises[ei][f] = v; }
       return n;
     });
   }, []);
-
-  const onRemoveFinisher = useCallback((di, ei) => {
-    setDays((p) => { const n = JSON.parse(JSON.stringify(p)); if (n[di].finisher.exercises.length <= 1) return p; n[di].finisher.exercises.splice(ei, 1); setTrackData((t) => { const nt = JSON.parse(JSON.stringify(t)); nt[di].finisher.splice(ei, 1); return nt; }); return n; });
-  }, []);
-
-  const onAddFinisher = useCallback((di) => {
-    setDays((p) => {
-      const n = JSON.parse(JSON.stringify(p));
-      n[di].finisher.exercises.push({ name: "New Exercise", sets: 3, reps: "10", rest: 30 });
-      setTrackData((t) => { const nt = JSON.parse(JSON.stringify(t)); nt[di].finisher.push({ sets: Array.from({ length: 3 }, () => ({ weight: "", reps: "", done: false })) }); return nt; });
-      return n;
-    });
-  }, []);
+  const onRemoveFinisher = useCallback((di, ei) => { setDays((p) => { const n = JSON.parse(JSON.stringify(p)); if (n[di].finisher.exercises.length <= 1) return p; n[di].finisher.exercises.splice(ei, 1); setTrackData((t) => { const nt = JSON.parse(JSON.stringify(t)); nt[di].finisher.splice(ei, 1); return nt; }); return n; }); }, []);
+  const onAddFinisher = useCallback((di) => { setDays((p) => { const n = JSON.parse(JSON.stringify(p)); n[di].finisher.exercises.push({ name: "New Exercise", sets: 3, reps: "10", rest: 30 }); setTrackData((t) => { const nt = JSON.parse(JSON.stringify(t)); nt[di].finisher.push({ sets: Array.from({ length: 3 }, () => ({ weight: "", reps: "", done: false })) }); return nt; }); return n; }); }, []);
 
   const saveSession = () => {
     setSaving(true);
@@ -784,7 +785,6 @@ export default function App() {
                 }}>{d.label}</button>
               ))}
             </div>
-
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: -0.5, color: day.color }}>{day.title}</h1>
@@ -803,7 +803,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-
             <div style={{ margin: "10px 0 12px", display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ flex: 1, height: 3, background: T.border, borderRadius: 2, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${pct}%`, borderRadius: 2, background: `linear-gradient(90deg, ${day.color}, ${day.color}cc)`, transition: "width 0.4s ease", boxShadow: pct > 5 ? T.glow(day.color) : "none" }} />
